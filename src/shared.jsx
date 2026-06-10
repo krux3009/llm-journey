@@ -1,0 +1,1055 @@
+/*
+  Journey of a Token — interactive explainer. SHARED block (single source).
+  Edit THIS file (plus stepper.jsx / scrolly.jsx), then run ./build.sh —
+  the compiled dist/*.js is what the HTML pages load. Commit dist/ output.
+
+  ASSUMPTIONS:
+  - Probabilities & attention scores are HAND-CRAFTED for teaching (banner shown in loop scene).
+  - Token IDs are illustrative, not from a real tokenizer.
+  - Real-model numbers (4096 / 14336 / 32 layers / 128256 vocab) from Llama 3 8B config, as of 2026-06-10.
+  - Copy rule: metaphor first, official terms live in the per-station “📄 in the papers” tag
+    and in the Station-8 decoder. Body text must read clean for a non-technical adult.
+*/
+const {useState, useEffect, useRef, useMemo} = React;
+
+const INK='#2B2B2B', BLUE='#2563EB', RUST='#C04A1A', GREEN='#1E7A4D', HL='#F5D547', PAPER='#FAF8F3';
+
+// ---------- i18n ----------
+const STRINGS = {
+en:{
+  appTitle:'Journey of a Token', appSub:'how an AI like ChatGPT reads your sentence and writes back — seen from inside',
+  langBtn:'中文', next:'Next →', back:'← Back', restart:'Restart journey',
+  stops:['Gate','Pieces','Meaning','Order','Meeting','Workshop','Conveyor','THE LOOP','Decoder'],
+  s0Title:'Pick a sentence. Become a word.',
+  s0Lead:'The AI behind every chatbot is a factory that does exactly one job: guess the next word-piece. To see how, you will ride through it as one of the words. Choose your sentence:',
+  s0Hero:(w)=>`You are “${w}”. For the rest of this tour, that yellow highlight is you.`,
+  s0Note:'Everything you will see is the real machinery — the same factory inside ChatGPT, Claude, or Llama. The numbers come from a real open model (Llama 3 8B).',
+  s1Title:'Station 1 · The front door — the chopping machine',
+  s1Nerd:'in the papers: “tokenizer”',
+  s1Lead:'The factory cannot read letters. A chopping machine splits your sentence into pieces and hands each piece a number — its place in a fixed catalogue of 128,256 pieces.',
+  s1Chop:'✂ Chop!', s1Undo:'↺ Put it back',
+  s1Tickets:'every piece collects a numbered catalogue ticket',
+  s1Sub:'Rare words get chopped into smaller pieces:',
+  s1Aside:'This is why these AIs once miscounted the R’s in “strawberry” — the factory sees catalogue numbers, never letters.',
+  s2Title:'Station 2 · The meaning desk',
+  s2Nerd:'in the papers: “embedding”',
+  s2Lead:(w)=>`Your number is traded for an arrow that points at your meaning. Words that mean similar things live in the same neighbourhood of the map. You, “${w}”, get the spot the factory learned from billions of sentences.`,
+  s2Hover:'Hover the dots — neighbours share meaning.',
+  s2Map:'the meaning map',
+  s2Groups:['royalty','places','pets','story words'],
+  s2Real:'Drawn flat here. In the real factory your arrow is a list of 4,096 numbers.',
+  s3Title:'Station 3 · The order stamp',
+  s3Nerd:'in the papers: “positional encoding (RoPE)”',
+  s3Lead:'Same word, different seat in the sentence → a different stamp. The stamp twists your arrow by an angle that depends on your seat number, so the factory can later feel which word came first and how far apart two words sit.',
+  s3SeatRow:'watch the same word change seats:',
+  s3Drag:'Drag your seat position:', s3Pos:(p)=>`seat ${p}`, s3Ghost:'arrow before the twist',
+  s4Title:'Station 4 · The meeting room',
+  s4Nerd:'in the papers: “attention” — Query · Key · Value',
+  s4Lead:(last,hero)=>`The only place where words talk to each other. The last word “${last}” must guess what comes next — so it holds up a question card, and every earlier word holds up a name-tag. Click each earlier word to compare its name-tag with the question.`,
+  s4YouGeneric:(hero,last)=>`You, “${hero}”, match the question best — your note of information is handed to “${last}”.`,
+  s4YouAsk:(winner,last)=>`This time you, “${last}”, are the one asking. “${winner}” matches your question best — its note of information flows into you.`,
+  s4OtherWins:(winner,last)=>`“${winner}” matches the question best — its note of information is handed to “${last}”.`,
+  s4Mask:'words after the reader are covered up — no peeking at the future',
+  s4B1Head:'1 · Who talks to whom',
+  s4B2Head:'2 · What the reader receives',
+  s4MixLead:'Every earlier word pours its note into the reader — more attention, bigger pour. The reader’s new meaning is the blend in the cup:',
+  s4Mix:(last)=>`“${last}”’s new understanding =`,
+  s4KV:'Memory-saver: the factory files every name-tag and note in a cabinet, so it never has to re-read the whole sentence from scratch. Modern factories even let 4 question-askers share 1 cabinet. (Papers call this the KV cache and GQA — Llama 3 8B: 32 askers, 8 cabinets.)',
+  s4ClickPrompt:'… click the words above',
+  s5Title:'Station 5 · The private workshop — the factory’s memory',
+  s5Nerd:'in the papers: “feed-forward network (FFN)”',
+  s5Lead:'After the meeting room, each word is processed alone. This station holds everything the factory ever learned about the world — and it is the reason the final guess is smart instead of mush.',
+  s5B1Head:'1 · Clues, no knowledge',
+  s5B1:'The meeting room only MOVED information between words — nothing new entered the factory. You now carry clues like these, but the factory still knows nothing about the world:',
+  s5B2Head:'2 · The memory drawers',
+  s5B2:(n)=>`Your arrow walks past thousands of labelled drawers. A drawer springs open when its label matches your clues — and pours what the factory learned into your arrow. (${n} drawers on this floor alone; 32 floors.)`,
+  s5B3Head:'3 · Why it matters',
+  s5B3:'The same station, with its memory switched on or off. This is why the workshop exists: the meeting room gathers the clues, the workshop adds the knowledge. Flip the switch:',
+  s5SwitchOn:'Workshop: ON', s5SwitchOff:'Workshop: OFF',
+  s5WithoutTitle:'guess WITHOUT the workshop', s5WithTitle:'guess WITH the workshop',
+  s5MushNote:'grammar-shaped mush — sounds like language, knows nothing. The loop would write nonsense.',
+  s5SharpNote:'the confident guess you will play with at THE LOOP',
+  s5Bridge:'For paper-readers: these drawers are what papers call key-value memories — the feed-forward network (FFN). Its width is the intermediate_size line in a model card (14,336 here). A learned dimmer (SwiGLU) decides how wide each drawer opens.',
+  s5Rome:'Facts physically live in these drawers: researchers (ROME) once swapped the contents of the “capital of France” drawer to “Rome” — and the AI began confidently answering Rome. No retraining needed.',
+  s5Next:'Next beat →', s5Prev:'← Back',
+  drawerMore:(n)=>`…and ${n} more drawers on this wall`,
+  home:'Home',
+  s6Title:'Station 6 · The conveyor belt',
+  s6Nerd:'in the papers: “residual stream” · “RMSNorm”',
+  s6Lead:'You repeat meeting-room → workshop 32 times. The golden rule: every station only ADDS a small correction onto your arrow — nothing is ever erased. Between stations, a gauge re-standardises your arrow’s length so the additions never blow up.',
+  s6Scrub:'Scrub through the 32 blocks:', s6Block:(n)=>`block ${n} / 32`,
+  s6Notes:(n)=>`${n} margin notes accumulated`,
+  s6StopA:'meeting', s6StopB:'workshop',
+  s6Gauge:'length gauge', s6GaugeSub:'length → standard ✓',
+  s7Title:'Final station · THE LOOP',
+  s7Nerd:'in the papers: “next-token prediction” · “logits” · “sampling”',
+  s7Lead:'At the exit, the last word’s finished arrow is scored against all 128,256 catalogue pieces, and the scores become chances of being picked. One piece is drawn — and here is the secret of every chatbot: the new piece is glued onto the sentence and THE WHOLE FACTORY RUNS AGAIN. One full trip per word-piece, until a special “I’m done” piece is drawn.',
+  s7Honest:'Honesty note: these chances are hand-designed for teaching. A real model computes them fresh from ~8 billion learned numbers.',
+  s7Temp:'Temperature (how daring the draw is)', s7TempLo:'careful', s7TempHi:'wild',
+  s7TopP:'Top-p (ignore the long tail of unlikely pieces)',
+  s7Sample:'🎲 Draw', s7Greedy:'Pick top', s7Auto:'▶ Auto-write', s7Stop:'■ Stop', s7Reset:'Reset',
+  s7Loops:(n)=>`factory ran ${n} time${n===1?'':'s'}`,
+  s7Done:(n)=>`Reply complete — the factory ran end-to-end ${n} times, once per piece.`,
+  s7Wheel:'the draw wheel — bigger slice, bigger chance',
+  s7Cut:'dropped by top-p',
+  s7Pipe:['chop','look up meaning','32 blocks','score','draw'],
+  s8Title:'Exit gift · the jargon decoder',
+  s8Lead:'You rode the whole factory without the jargon — here are the official names. Every line of a real model card names a part you just visited. (Numbers: Llama 3 8B.) Click a row to revisit its station.',
+  s8Close:'That’s the whole machine: one loop, run once per word-piece. Now open any model card — you’ll recognise every part.',
+  s8Cols:['config term','factory part','what it means'],
+  footer:'Made by hand by Li Xuan · more at kruxqlyz.com',
+},
+zh:{
+  appTitle:'一个 Token 的旅程', appSub:'从词的视角，看 ChatGPT 这类 AI 如何读懂句子并回复',
+  langBtn:'EN', next:'下一站 →', back:'← 上一站', restart:'重新开始',
+  stops:['大门','切片','语义','顺序','会议室','车间','传送带','循环','解码器'],
+  s0Title:'选一个句子，变成其中一个词。',
+  s0Lead:'聊天机器人背后的 AI 是一座工厂，只做一件事：猜下一个词片。为了看清原理，你将化身句中的一个词亲自走一遍。选择你的句子：',
+  s0Hero:(w)=>`你是「${w}」。接下来整趟旅程，黄色高亮就是你。`,
+  s0Note:'你将看到的都是真实的机器——ChatGPT、Claude、Llama 内部同样的工厂。数字来自真实开源模型 Llama 3 8B。',
+  s1Title:'第一站 · 工厂大门——切片机',
+  s1Nerd:'论文里叫：分词器 tokenizer',
+  s1Lead:'工厂读不懂字母。一台切片机把句子切成词片，每片领到一个编号——它在一本固定目录（共 128,256 片）里的位置。',
+  s1Chop:'✂ 切！', s1Undo:'↺ 拼回去',
+  s1Tickets:'每片领到一张目录号码票',
+  s1Sub:'生僻词会被切成更小的片：',
+  s1Aside:'这就是这类 AI 曾数错 strawberry 里有几个 R 的原因——工厂只看目录编号，从不看字母。',
+  s2Title:'第二站 · 语义服务台',
+  s2Nerd:'论文里叫：词嵌入 embedding',
+  s2Lead:(w)=>`你的编号被换成「语义地图」上的一个位置。意思相近的词，住在地图上同一个街区。你（「${w}」）的位置，是工厂从几十亿个句子里学来的。`,
+  s2Hover:'悬停圆点——相邻的词意思相近。',
+  s2Map:'语义地图',
+  s2Groups:['王室','地名','宠物','故事词'],
+  s2Real:'这里画成了平面。真实工厂里，你的位置是一串 4,096 个数字。',
+  s3Title:'第三站 · 顺序印章',
+  s3Nerd:'论文里叫：位置编码 RoPE',
+  s3Lead:'同一个词，坐在句子的不同位置 → 盖不同的章。印章按你的座位号把箭头转一个角度，让工厂之后能感觉到谁先谁后、隔了多远。',
+  s3SeatRow:'看同一个词换座位：',
+  s3Drag:'拖动你的座位位置：', s3Pos:(p)=>`座位 ${p}`, s3Ghost:'旋转前的箭头',
+  s4Title:'第四站 · 会议室',
+  s4Nerd:'论文里叫：注意力 attention——Query · Key · Value',
+  s4Lead:(last,hero)=>`词与词唯一能交流的地方。最后一个词「${last}」要猜接下来是什么——于是它举起一张提问卡，每个更早的词举起自己的名牌。点击每个早先的词，看它的名牌和提问卡有多匹配。`,
+  s4YouGeneric:(hero,last)=>`你（「${hero}」）和提问最匹配——你的信息便条被递给了「${last}」。`,
+  s4YouAsk:(winner,last)=>`这一次提问的是你（「${last}」）。「${winner}」和你的提问最匹配——它的信息便条流进了你这里。`,
+  s4OtherWins:(winner,last)=>`「${winner}」和提问最匹配——它的信息便条被递给了「${last}」。`,
+  s4Mask:'读者之后的词被盖住——禁止偷看未来',
+  s4B1Head:'1 · 谁在和谁说话',
+  s4B2Head:'2 · 读者收到了什么',
+  s4MixLead:'每个更早的词把自己的便条倒进读者的杯子——注意力越多，倒得越多。读者的新含义，就是杯中的混合：',
+  s4Mix:(last)=>`「${last}」的新含义 =`,
+  s4KV:'省力机制：工厂把每张名牌和便条都存进文件柜，不必每次从头重读整句话。现代工厂还让 4 个提问者共用 1 个柜子。（论文里叫 KV 缓存和 GQA——Llama 3 8B：32 个提问者、8 个柜子。）',
+  s4ClickPrompt:'…点击上方的词',
+  s5Title:'第五站 · 私人车间——工厂的记忆',
+  s5Nerd:'论文里叫：前馈网络 FFN',
+  s5Lead:'离开会议室后，每个词独自接受加工。这一站存放着工厂学到的关于世界的一切——也是最终猜测「聪明」而非「糊状」的原因。',
+  s5B1Head:'1 · 有线索，没知识',
+  s5B1:'会议室只是在词与词之间搬运信息——工厂里没有进来任何新东西。你现在带着这些线索，但工厂对世界仍一无所知：',
+  s5B2Head:'2 · 记忆抽屉墙',
+  s5B2:(n)=>`你的箭头走过成千上万个贴着标签的抽屉。标签与你的线索匹配的抽屉会弹开——把工厂学到的内容倒进你的箭头。（仅这一层就有 ${n} 个抽屉；共 32 层。）`,
+  s5B3Head:'3 · 它为什么重要',
+  s5B3:'同一个工位，记忆开启或关闭。这就是车间存在的理由：会议室收集线索，车间注入知识。拨动开关试试：',
+  s5SwitchOn:'车间：运转中', s5SwitchOff:'车间：已关闭',
+  s5WithoutTitle:'没有车间时的猜测', s5WithTitle:'有车间时的猜测',
+  s5MushNote:'语法上像句话，但什么都不知道——糊状猜测。循环只会写出胡话。',
+  s5SharpNote:'这就是你将在「循环」站玩到的自信猜测',
+  s5Bridge:'给读论文的人：这些抽屉就是论文里的 key-value memories——前馈网络（FFN）。它的宽度即模型卡里的 intermediate_size（此处 14,336）。每个抽屉开多大，由一个学到的调光器（SwiGLU）决定。',
+  s5Rome:'事实就住在这些抽屉里：研究者（ROME）曾把「法国首都」抽屉的内容换成「罗马」——这个 AI 从此自信地回答罗马。无需重新训练。',
+  s5Next:'下一幕 →', s5Prev:'← 上一幕',
+  drawerMore:(n)=>`……这面墙上还有 ${n} 个抽屉`,
+  home:'主页',
+  s6Title:'第六站 · 传送带',
+  s6Nerd:'论文里叫：残差流 residual stream · RMSNorm',
+  s6Lead:'「会议室 → 车间」你要重复 32 次。黄金法则：每一站只往你的箭头上「加」一笔小修正——什么都不会被擦掉。站与站之间有一个校准仪，把箭头长度调回标准，防止越加越大。',
+  s6Scrub:'拖动浏览 32 个厂块：', s6Block:(n)=>`第 ${n} / 32 块`,
+  s6Notes:(n)=>`已累积 ${n} 条页边批注`,
+  s6StopA:'会议室', s6StopB:'车间',
+  s6Gauge:'长度校准仪', s6GaugeSub:'长度 → 标准 ✓',
+  s7Title:'终点站 · 循环',
+  s7Nerd:'论文里叫：下一词预测 · logits · 抽样 sampling',
+  s7Lead:'在出口，最后一个词的成品箭头与目录里全部 128,256 个词片逐一打分，分数变成各片的中签机会。抽出一片——接着是所有聊天机器人的秘密：新词片粘回句尾，整座工厂重新跑一遍。每个词片跑一整趟，直到抽到表示「说完了」的特殊词片。',
+  s7Honest:'诚实声明：这里的机会是为教学手工设计的。真实模型由约 80 亿个学到的数字现场计算。',
+  s7Temp:'温度（抽签有多大胆）', s7TempLo:'谨慎', s7TempHi:'狂野',
+  s7TopP:'Top-p（忽略机会渺茫的长尾）',
+  s7Sample:'🎲 抽一片', s7Greedy:'选最高', s7Auto:'▶ 自动写', s7Stop:'■ 停止', s7Reset:'重置',
+  s7Loops:(n)=>`工厂已运转 ${n} 次`,
+  s7Done:(n)=>`回复完成——工厂端到端运转了 ${n} 次，每个词片一次。`,
+  s7Wheel:'抽签转盘——扇区越大，机会越大',
+  s7Cut:'被 top-p 舍弃',
+  s7Pipe:['切片','查语义','32 厂块','打分','抽签'],
+  s8Title:'出口礼物 · 术语解码器',
+  s8Lead:'整趟旅程没用术语——现在送你官方名字。真实模型卡的每一行配置，都对应你刚经过的一个工厂部件（数字：Llama 3 8B）。点击行可回到对应站点。',
+  s8Close:'整台机器就是：一个循环，每个词片跑一次。现在去打开任何模型卡——每个部件你都认识。',
+  s8Cols:['配置项','工厂部件','含义'],
+  footer:'立瑄手作 · 更多见 kruxqlyz.com',
+}};
+
+// ---------- toy LM data ----------
+const PROMPTS=[
+ {id:'cat', label:'The cat sat on the',
+  tokens:['The','cat','sat','on','the'], ids:[791,4937,7731,389,279],
+  hero:1, reader:4,
+  att:[{i:0,s:0.9},{i:1,s:3.6},{i:2,s:2.1},{i:3,s:1.2}],
+  ffn:{
+    clues:{en:['“the ___” → an object is coming','subject nearby: cat','scene: something being sat on'],
+           zh:['「the ___」→ 后面要来一个物体','附近的主语：cat（猫）','场景：有东西被坐着']},
+    drawers:[
+      {l:'cats sit on things',a:'+ mat, sofa, windowsill',lz:'猫爱坐在东西上',az:'+ 垫子、沙发、窗台',match:true},
+      {l:'“the” needs a noun',a:'+ expect a thing-word',lz:'「the」后接名词',az:'+ 预期一个名词',match:true},
+      {l:'cozy household scenes',a:'+ home objects',lz:'温馨居家场景',az:'+ 家居物品',match:true},
+      {l:'capital cities',a:'(stays shut)',lz:'各国首都',az:'（没动静）',match:false},
+      {l:'storybook openings',a:'(stays shut)',lz:'童话开场白',az:'（没动静）',match:false}],
+    before:[{t:'mat',p:.12},{t:'blue',p:.11},{t:'sofa',p:.11},{t:'running',p:.10},{t:'Paris',p:.09}]},
+  start:[{t:'mat',p:.58},{t:'sofa',p:.15},{t:'floor',p:.10},{t:'keyboard',p:.08},{t:'windowsill',p:.05},{t:'moon',p:.04}],
+  bigram:{
+    mat:[{t:',',p:.4},{t:'.',p:.3},{t:'and',p:.3}],
+    sofa:[{t:',',p:.4},{t:'.',p:.35},{t:'and',p:.25}],
+    floor:[{t:',',p:.4},{t:'.',p:.35},{t:'and',p:.25}],
+    keyboard:[{t:',',p:.35},{t:'and',p:.35},{t:'.',p:.3}],
+    windowsill:[{t:',',p:.45},{t:'.',p:.3},{t:'and',p:.25}],
+    moon:[{t:',',p:.4},{t:'.',p:.35},{t:'and',p:.25}],
+    ',':[{t:'purring',p:.45},{t:'watching',p:.3},{t:'waiting',p:.25}],
+    and:[{t:'purred',p:.4},{t:'fell',p:.3},{t:'stretched',p:.3}],
+    purring:[{t:'softly',p:.5},{t:'loudly',p:.3},{t:'.',p:.2}],
+    watching:[{t:'the',p:.6},{t:'birds',p:.4}],
+    waiting:[{t:'for',p:1}],
+    for:[{t:'dinner',p:.6},{t:'its',p:.4}],
+    its:[{t:'human',p:1}], human:[{t:'.',p:1}], dinner:[{t:'.',p:1}],
+    the:[{t:'birds',p:.6},{t:'rain',p:.4}],
+    birds:[{t:'outside',p:.5},{t:'.',p:.5}], outside:[{t:'.',p:1}], rain:[{t:'.',p:1}],
+    softly:[{t:'.',p:1}], loudly:[{t:'.',p:1}],
+    purred:[{t:'happily',p:.5},{t:'.',p:.5}], happily:[{t:'.',p:1}],
+    fell:[{t:'asleep',p:1}], asleep:[{t:'.',p:1}],
+    stretched:[{t:'out',p:.6},{t:'.',p:.4}], out:[{t:'.',p:1}],
+  }},
+ {id:'paris', label:'Paris is the capital of',
+  tokens:['Paris','is','the','capital','of'], ids:[60704,374,279,6864,315],
+  hero:0, reader:4,
+  att:[{i:0,s:4.1},{i:1,s:0.7},{i:2,s:0.5},{i:3,s:2.6}],
+  ffn:{
+    clues:{en:['“capital of ___” → a country fits','subject: Paris','tone: encyclopedia sentence'],
+           zh:['「capital of ___」→ 该填一个国家','主语：Paris（巴黎）','语气：百科句式']},
+    drawers:[
+      {l:'capital of France ↔ Paris',a:'+ France — the fact!',lz:'法国首都 ↔ 巴黎',az:'+ France——事实本体！',match:true},
+      {l:'geography & place names',a:'+ country words',lz:'地理与地名',az:'+ 国家词汇',match:true},
+      {l:'encyclopedia tone',a:'+ formal endings',lz:'百科语气',az:'+ 正式收尾',match:true},
+      {l:'cats sit on things',a:'(stays shut)',lz:'猫爱坐在东西上',az:'（没动静）',match:false},
+      {l:'storybook openings',a:'(stays shut)',lz:'童话开场白',az:'（没动静）',match:false}],
+    before:[{t:'France',p:.15},{t:'Europe',p:.13},{t:'London',p:.12},{t:'pizza',p:.10},{t:'the',p:.09}]},
+  start:[{t:'France',p:.91},{t:'the',p:.04},{t:'a',p:.02},{t:'Europe',p:.02},{t:'romance',p:.01}],
+  bigram:{
+    France:[{t:'.',p:.8},{t:',',p:.15},{t:'and',p:.05}],
+    ',':[{t:'and',p:.6},{t:'home',p:.4}],
+    and:[{t:'its',p:.55},{t:'the',p:.45}],
+    its:[{t:'culture',p:1}], culture:[{t:'.',p:1}],
+    the:[{t:'French',p:.6},{t:'country',p:.4}],
+    French:[{t:'Republic',p:.8},{t:'nation',p:.2}],
+    Republic:[{t:'.',p:1}], nation:[{t:'.',p:1}], country:[{t:'.',p:1}],
+    a:[{t:'European',p:.6},{t:'beautiful',p:.4}],
+    European:[{t:'country',p:.7},{t:'capital',p:.3}],
+    beautiful:[{t:'city',p:1}], city:[{t:'.',p:1}], capital:[{t:'.',p:1}],
+    Europe:[{t:'.',p:.7},{t:',',p:.3}], romance:[{t:'.',p:1}],
+    home:[{t:'of',p:.6},{t:'to',p:.4}],
+    of:[{t:'fashion',p:.5},{t:'art',p:.5}], to:[{t:'fashion',p:.5},{t:'art',p:.5}],
+    fashion:[{t:'.',p:1}], art:[{t:'.',p:1}],
+  }},
+ {id:'story', label:'Once upon a time',
+  tokens:['Once','upon','a','time'], ids:[12805,5304,264,892],
+  hero:3, reader:3,
+  att:[{i:0,s:2.8},{i:1,s:2.2},{i:2,s:1.4}],
+  ffn:{
+    clues:{en:['“once upon a ___” pattern','tone: a story is starting','next: who / where'],
+           zh:['「once upon a ___」句式','语气：故事要开始了','接下来：谁 / 在哪']},
+    drawers:[
+      {l:'storybook openings',a:'+ “, there was…”',lz:'童话开场白',az:'+ 「, there was…」',match:true},
+      {l:'fairy-tale cast',a:'+ princess, dragon, robot',lz:'童话角色库',az:'+ 公主、龙、机器人',match:true},
+      {l:'narrative voice',a:'+ gentle pacing',lz:'叙事语态',az:'+ 舒缓节奏',match:true},
+      {l:'capital cities',a:'(stays shut)',lz:'各国首都',az:'（没动静）',match:false},
+      {l:'cats sit on things',a:'(stays shut)',lz:'猫爱坐在东西上',az:'（没动静）',match:false}],
+    before:[{t:',',p:.13},{t:'there',p:.12},{t:'machine',p:.11},{t:'the',p:.10},{t:'blue',p:.09}]},
+  start:[{t:',',p:.38},{t:'there',p:.30},{t:'in',p:.18},{t:'a',p:.08},{t:'long',p:.06}],
+  bigram:{
+    ',':[{t:'there',p:.55},{t:'in',p:.3},{t:'a',p:.15}],
+    there:[{t:'was',p:.6},{t:'lived',p:.4}],
+    was:[{t:'a',p:.7},{t:'an',p:.3}],
+    lived:[{t:'a',p:.8},{t:'an',p:.2}],
+    a:[{t:'princess',p:.3},{t:'dragon',p:.25},{t:'tiny',p:.25},{t:'robot',p:.2}],
+    an:[{t:'old',p:.6},{t:'inventor',p:.4}],
+    in:[{t:'a',p:.7},{t:'the',p:.3}],
+    the:[{t:'mountains',p:.5},{t:'forest',p:.5}],
+    princess:[{t:'who',p:.5},{t:'.',p:.3},{t:'and',p:.2}],
+    dragon:[{t:'who',p:.5},{t:'.',p:.3},{t:'and',p:.2}],
+    tiny:[{t:'robot',p:.6},{t:'village',p:.4}],
+    robot:[{t:'who',p:.5},{t:'.',p:.5}],
+    village:[{t:'.',p:.6},{t:'by',p:.4}],
+    who:[{t:'loved',p:.6},{t:'dreamed',p:.4}],
+    loved:[{t:'to',p:.6},{t:'the',p:.4}],
+    dreamed:[{t:'of',p:1}],
+    of:[{t:'flying',p:.6},{t:'the',p:.4}],
+    to:[{t:'sing',p:.5},{t:'explore',p:.5}],
+    sing:[{t:'.',p:1}], explore:[{t:'.',p:1}], flying:[{t:'.',p:1}],
+    old:[{t:'inventor',p:.7},{t:'wizard',p:.3}],
+    inventor:[{t:'who',p:.6},{t:'.',p:.4}],
+    wizard:[{t:'who',p:.6},{t:'.',p:.4}],
+    and:[{t:'everyone',p:.6},{t:'the',p:.4}],
+    everyone:[{t:'loved',p:1}],
+    long:[{t:'ago',p:.9},{t:',',p:.1}],
+    ago:[{t:',',p:.6},{t:'.',p:.4}],
+    mountains:[{t:'.',p:.6},{t:',',p:.4}],
+    forest:[{t:',',p:.5},{t:'.',p:.5}],
+    by:[{t:'the',p:1}],
+  }},
+];
+
+// ---------- toy LM math ----------
+function applyTemperature(cands,T){
+  const w=cands.map(c=>Math.pow(Math.max(c.p,1e-6),1/T));
+  const s=w.reduce((a,b)=>a+b,0);
+  return cands.map((c,i)=>({...c,q:w[i]/s}));
+}
+function topPSet(cands,topP){ // cands sorted desc by q
+  let cum=0; const kept=[];
+  for(const c of cands){ kept.push(c); cum+=c.q; if(cum>=topP) break; }
+  return kept;
+}
+function nextCandidates(prompt,genTokens){
+  const last=genTokens.length?genTokens[genTokens.length-1]:null;
+  if(last===null) return prompt.start;
+  return prompt.bigram[last]||[{t:'.',p:1}];
+}
+
+// ---------- small shared components ----------
+function ArrowSvg({angle=0,len=110,color=RUST,ghost=false,notes=0,w=260,h=200}){
+  const cx=w/2,cy=h/2;
+  const rad=angle*Math.PI/180;
+  const x2=cx+len*Math.cos(rad), y2=cy-len*Math.sin(rad);
+  const ticks=[];
+  for(let i=0;i<notes;i++){
+    const f=(i+1)/(notes+1);
+    const tx=cx+len*f*Math.cos(rad), ty=cy-len*f*Math.sin(rad);
+    ticks.push(<circle key={i} cx={tx} cy={ty} r="3.5" fill={i%2?BLUE:GREEN} opacity="0.85"/>);
+  }
+  return (
+    <svg width={w} height={h} style={{display:'block'}}>
+      <line x1={cx} y1={cy} x2={x2} y2={y2} stroke={color} strokeWidth="5"
+        strokeLinecap="round" opacity={ghost?0.25:1} strokeDasharray={ghost?'7 7':'none'}/>
+      <polygon points={`${x2},${y2} ${x2-14*Math.cos(rad-0.45)},${y2+14*Math.sin(rad-0.45)} ${x2-14*Math.cos(rad+0.45)},${y2+14*Math.sin(rad+0.45)}`}
+        fill={color} opacity={ghost?0.25:1}/>
+      <circle cx={cx} cy={cy} r="5" fill={INK}/>
+      {ticks}
+    </svg>);
+}
+function SceneFrame({title,lead,children,aside,nerd}){
+  return (
+    <div style={{maxWidth:880,margin:'0 auto',padding:'8px 8px 24px'}}>
+      <h2 className="hand" style={{fontSize:38,margin:'4px 0 6px',lineHeight:1.1}}>{title}</h2>
+      {nerd && <div className="nerd-tag">📄 {nerd}</div>}
+      <p style={{fontSize:16.5,lineHeight:1.55,margin:'0 0 18px',maxWidth:760}}>{lead}</p>
+      {children}
+      {aside && <div style={{marginTop:18,padding:'12px 16px',border:`2px dashed ${RUST}`,
+        borderRadius:12,background:'#FFF7F2',fontSize:14.5,lineHeight:1.5}}>✏️ {aside}</div>}
+    </div>);
+}
+function SentenceRow({prompt,heroOn=true,maskFrom=null,onTok=null,active=[],gen=[]}){
+  return (
+    <div style={{margin:'6px 0 14px'}}>
+      {prompt.tokens.map((t,i)=>{
+        const cls=['tok'];
+        if(heroOn&&i===prompt.hero) cls.push('hero');
+        if(maskFrom!==null&&i>maskFrom) cls.push('future');
+        if(onTok&&i<prompt.reader) cls.push('clickable');
+        if(active.includes(i)) cls.push('flash');
+        return <span key={i} className={cls.join(' ')}
+          onClick={onTok&&i<prompt.reader?()=>onTok(i):undefined}>{t}</span>;
+      })}
+      {gen.map((t,i)=><span key={'g'+i} className="tok gen pop-anim">{t}</span>)}
+    </div>);
+}
+
+// ---------- scenes ----------
+function Scene0({L,prompt,setPromptId}){
+  return (
+    <SceneFrame title={L.s0Title} lead={L.s0Lead} aside={L.s0Note}>
+      <div style={{display:'flex',gap:14,flexWrap:'wrap'}}>
+        {PROMPTS.map(p=>(
+          <div key={p.id} className="wb-card" onClick={()=>setPromptId(p.id)}
+            style={{padding:'16px 20px',cursor:'pointer',flex:'1 1 220px',
+              outline:p.id===prompt.id?`4px solid ${BLUE}`:'none'}}>
+            <div className="hand" style={{fontSize:26}}>“{p.label} …”</div>
+          </div>))}
+      </div>
+      <div style={{marginTop:22}}>
+        <SentenceRow prompt={prompt}/>
+        <p className="hand" style={{fontSize:26,color:RUST,margin:'6px 0 0'}}>{L.s0Hero(prompt.tokens[prompt.hero])}</p>
+      </div>
+    </SceneFrame>);
+}
+
+// The chopping machine: one continuous sentence ribbon → blade sweeps →
+// pieces drift apart → each collects a numbered catalogue ticket.
+function Scene1({L,prompt,progress}){
+  const [chopSel,setChopSel]=useState(false);
+  useEffect(()=>{setChopSel(false);},[prompt.id]);
+  // t: 0 = intact ribbon, 1 = fully chopped (stepper animates via CSS, scrolly scrubs)
+  const t=progress==null?(chopSel?1:0):Math.max(0,Math.min(1,(progress-0.1)/0.55));
+  const ticketsOn=t>0.8;
+  const widths=prompt.tokens.map(tk=>tokBoxW(tk));
+  const xs=[]; let x=12;
+  widths.forEach(w=>{xs.push(x); x+=w;});
+  const GAP=20, ribbonW=x-12;
+  const W=x+12+(prompt.tokens.length-1)*GAP, TOPY=34;
+  const trans={transition:'all .7s cubic-bezier(.2,.8,.2,1)'};
+  return (
+    <SceneFrame title={L.s1Title} lead={L.s1Lead} aside={L.s1Aside} nerd={L.s1Nerd}>
+      <div className="wb-card" style={{padding:'10px 16px',width:'fit-content',maxWidth:'100%'}}>
+        <svg viewBox={`0 0 ${W} 128`} style={{width:'100%',maxWidth:W,display:'block'}}>
+          {/* intact ribbon outline, fades as the pieces take over */}
+          <rect x={12} y={TOPY} width={ribbonW} height={40} rx={10} fill="none"
+            stroke={INK} strokeWidth="2.5" opacity={1-t} style={trans}/>
+          {/* blade sweeps across as t goes 0→1 */}
+          <text x={12+t*ribbonW} y={TOPY-10} textAnchor="middle" fontSize="20"
+            opacity={t<=0?0:t>=1?0:1} style={trans}>✂️</text>
+          {prompt.tokens.map((tk,i)=>{
+            const isHero=i===prompt.hero;
+            return (
+              <g key={i} transform={`translate(${i*GAP*t},0)`} style={trans}>
+                <rect x={xs[i]} y={TOPY} width={widths[i]} height={40} rx={10}
+                  fill={isHero?HL:'#fff'} fillOpacity={isHero?1:t}
+                  stroke={INK} strokeWidth="2" strokeOpacity={t} style={trans}/>
+                {/* cut line at this piece's left edge while still a ribbon */}
+                {i>0&&<line x1={xs[i]} y1={TOPY+3} x2={xs[i]} y2={TOPY+37}
+                  stroke={RUST} strokeWidth="2" strokeDasharray="4 4"
+                  opacity={t<0.5?t*1.6:Math.max(0,(1-t)*1.6)} style={trans}/>}
+                <text x={xs[i]+widths[i]/2} y={TOPY+26} textAnchor="middle" fontSize="16"
+                  fontWeight="700" fontFamily="Nunito,sans-serif">{tk}</text>
+                {/* catalogue ticket */}
+                <g className={ticketsOn?'stamp-anim':''} opacity={ticketsOn?1:0}
+                  style={{animationDelay:(i*0.1)+'s'}}>
+                  <rect x={xs[i]+widths[i]/2-29} y={TOPY+52} width={58} height={24} rx={5}
+                    fill="#F0F5FF" stroke={BLUE} strokeWidth="1.5" strokeDasharray="4 3"/>
+                  <text x={xs[i]+widths[i]/2} y={TOPY+68} textAnchor="middle" fontSize="12.5"
+                    fontWeight="800" fill={BLUE} fontFamily="Nunito,sans-serif">#{prompt.ids[i]}</text>
+                </g>
+              </g>);
+          })}
+        </svg>
+        <div style={{fontSize:12.5,color:'var(--faint)',margin:'2px 2px 6px',minHeight:18}}>
+          {ticketsOn?'🎟 '+L.s1Tickets:''}</div>
+      </div>
+      {progress==null&&(
+        <button className="wb-btn rust" data-testid="chop" style={{marginTop:14}}
+          onClick={()=>setChopSel(c=>!c)}>{chopSel?L.s1Undo:L.s1Chop}</button>)}
+      <div style={{marginTop:20,fontSize:15}}>
+        {L.s1Sub}{' '}
+        <span className="tok">token<span style={{display:'block',fontSize:11,color:BLUE}}>#5963</span></span>
+        <span style={{fontWeight:800}}>+</span>
+        <span className="tok">ization<span style={{display:'block',fontSize:11,color:BLUE}}>#2065</span></span>
+      </div>
+    </SceneFrame>);
+}
+
+const MEANING_DOTS=[
+  {w:'king',x:36,y:44,c:0},{w:'queen',x:78,y:36,c:0},{w:'prince',x:50,y:72,c:0},
+  {w:'Paris',x:186,y:40,c:1},{w:'France',x:232,y:62,c:1},{w:'London',x:178,y:68,c:1},
+  {w:'cat',x:88,y:142,c:2},{w:'dog',x:138,y:158,c:2},{w:'kitten',x:78,y:168,c:2},
+  {w:'time',x:212,y:132,c:3},{w:'once',x:252,y:152,c:3},{w:'story',x:202,y:160,c:3},
+];
+const DOT_COLORS=[BLUE,GREEN,RUST,'#8B5CF6'];
+function Scene2({L,prompt}){
+  const [hov,setHov]=useState(null);
+  const heroWord=prompt.tokens[prompt.hero];
+  const heroDot=MEANING_DOTS.find(d=>d.w.toLowerCase()===heroWord.toLowerCase())||MEANING_DOTS[6];
+  const heroColor=DOT_COLORS[heroDot.c];
+  return (
+    <SceneFrame title={L.s2Title} lead={L.s2Lead(heroWord)} aside={L.s2Real} nerd={L.s2Nerd}>
+      <div style={{fontSize:13,color:'var(--faint)',marginBottom:4}}>{L.s2Hover}</div>
+      <div className="wb-card" style={{padding:10,display:'inline-block',maxWidth:'100%'}}>
+        <svg viewBox="0 0 330 212" style={{width:'100%',maxWidth:330,display:'block'}}>
+          <text x="322" y="206" textAnchor="end" fontSize="15" fontFamily="Caveat,cursive"
+            fill="rgba(43,43,43,.5)">🗺 {L.s2Map}</text>
+          {/* neighbourhoods: same-meaning words live together */}
+          {[{cx:64,cy:54,rx:52,ry:36},{cx:206,cy:54,rx:56,ry:34},
+            {cx:110,cy:154,rx:56,ry:32},{cx:230,cy:146,rx:54,ry:32}].map((e,c)=>(
+            <g key={c} opacity={hov!==null&&MEANING_DOTS[hov].c!==c?0.25:1} style={{transition:'opacity .25s'}}>
+              <ellipse cx={e.cx} cy={e.cy} rx={e.rx} ry={e.ry} fill={DOT_COLORS[c]} fillOpacity=".07"
+                stroke={DOT_COLORS[c]} strokeWidth="1.5" strokeDasharray="5 4" strokeOpacity=".5"/>
+              <text x={e.cx} y={e.cy-e.ry-4} textAnchor="middle" fontSize="11.5" fontWeight="800"
+                fill={DOT_COLORS[c]} fontFamily="Nunito,sans-serif">{L.s2Groups[c]}</text>
+            </g>))}
+          {MEANING_DOTS.map((d,i)=>{
+            const isHero=d===heroDot, dim=hov!==null&&MEANING_DOTS[hov].c!==d.c&&!isHero;
+            return (<g key={i} onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)} style={{cursor:'pointer'}}>
+              <circle cx={d.x} cy={d.y} r={isHero?8:6} fill={DOT_COLORS[d.c]} opacity={dim?0.18:1}/>
+              {isHero&&<circle cx={d.x} cy={d.y} r="13" fill="none" stroke={heroColor} strokeWidth="2"
+                strokeDasharray="4 3" className="pop-anim"/>}
+              <text x={d.x+9} y={d.y+4} fontSize="12.5" fontWeight={isHero?800:600}
+                fill={isHero?heroColor:INK} opacity={dim?0.18:1}>{d.w}</text>
+            </g>);})}
+        </svg>
+      </div>
+    </SceneFrame>);
+}
+
+function Scene3({L,prompt,progress}){
+  const [pos,setPos]=useState(prompt.hero+1);
+  const p=progress==null?pos:1+Math.round(progress*7);
+  const heroWord=prompt.tokens[prompt.hero];
+  return (
+    <SceneFrame title={L.s3Title} lead={L.s3Lead} nerd={L.s3Nerd}>
+      {/* the word physically changes seat; the stamp below twists with it */}
+      <div style={{fontSize:13,color:'var(--faint)',marginBottom:6}}>{L.s3SeatRow}</div>
+      <div style={{display:'flex',gap:6,marginBottom:18,alignItems:'flex-start',
+        overflowX:'auto',paddingBottom:4}}>
+        {Array.from({length:8},(_,k)=>{
+          const seat=k+1, isHere=seat===p;
+          return (
+            <div key={k} style={{minWidth:58,textAlign:'center'}}>
+              <div style={{height:36,display:'flex',alignItems:'center',justifyContent:'center',
+                border:isHere?`2px solid ${INK}`:'2px dashed rgba(43,43,43,.22)',
+                borderRadius:9,background:isHere?HL:'transparent',
+                fontWeight:800,fontSize:14.5,transition:'all .25s'}}>
+                {isHere?heroWord:''}
+              </div>
+              <div style={{fontSize:10.5,color:isHere?RUST:'var(--faint)',fontWeight:isHere?800:400,
+                marginTop:3}}>{isHere?L.s3Pos(seat):seat}</div>
+            </div>);
+        })}
+      </div>
+      <div style={{display:'flex',gap:24,alignItems:'center',flexWrap:'wrap'}}>
+        <div className="wb-card" style={{padding:8}}>
+          <ArrowSvg angle={35} ghost w={240} h={180}/>
+          <div style={{textAlign:'center',fontSize:12.5,color:'var(--faint)',marginTop:-26}}>{L.s3Ghost}</div>
+        </div>
+        <div className="hand" style={{fontSize:34}}>→</div>
+        <div className="wb-card" style={{padding:8}}>
+          <ArrowSvg angle={35+p*18} w={240} h={180}/>
+          <div style={{textAlign:'center',fontSize:13,fontWeight:800,color:RUST,marginTop:-26}}>{L.s3Pos(p)} · +{p*18}°</div>
+        </div>
+      </div>
+      {progress==null&&<div style={{maxWidth:420,marginTop:18}}>
+        <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>{L.s3Drag}</div>
+        <input type="range" min="1" max="8" value={pos} onChange={e=>setPos(+e.target.value)}/>
+      </div>}
+    </SceneFrame>);
+}
+
+const MIX_COLORS=[BLUE,GREEN,'#8B5CF6','#C7791B','#0E7490','#BE185D'];
+function tokBoxW(t){return t.length*10.5+26;}
+
+// Beat 1 of the meeting room: arc diagram — who talks to whom.
+function AttnArcs({L,prompt,revealed,onReveal}){
+  const scores=prompt.att;
+  const exp=scores.map(a=>revealed.includes(a.i)?Math.exp(a.s):0);
+  const sum=exp.reduce((a,b)=>a+b,0)||1;
+  const widths=prompt.tokens.map((t,i)=>tokBoxW(t)+(i===prompt.reader?24:0));
+  const xs=[]; let x=10;
+  widths.forEach(w=>{xs.push(x); x+=w+10;});
+  const W=x+4, TOPY=150;
+  const cx=(i)=>xs[i]+widths[i]/2;
+  return (
+    <svg viewBox={`0 0 ${W} 196`} style={{width:'100%',maxWidth:W,display:'block'}}>
+      {scores.map(a=>{
+        const on=revealed.includes(a.i);
+        const w=on?exp[scores.indexOf(a)]/sum:0;
+        const h=34+(prompt.reader-a.i)*24;
+        const midX=(cx(a.i)+cx(prompt.reader))/2;
+        const isHero=a.i===prompt.hero;
+        return (
+          <path key={a.i} d={`M ${cx(a.i)} ${TOPY-6} Q ${midX} ${TOPY-6-h*2} ${cx(prompt.reader)} ${TOPY-6}`}
+            fill="none" stroke={on?(isHero?RUST:BLUE):'rgba(43,43,43,.25)'}
+            strokeWidth={on?2+w*16:1.5} strokeDasharray={on?'none':'5 5'}
+            strokeLinecap="round" opacity={on?.85:1} style={{transition:'stroke-width .45s'}}/>);
+      })}
+      {/* labels after arcs so the white halo sits on top of every stroke */}
+      {scores.map(a=>{
+        const on=revealed.includes(a.i);
+        if(!on) return null;
+        const w=exp[scores.indexOf(a)]/sum;
+        const h=34+(prompt.reader-a.i)*24;
+        const midX=(cx(a.i)+cx(prompt.reader))/2;
+        const isHero=a.i===prompt.hero;
+        return (
+          <text key={a.i} x={midX} y={TOPY-10-h} textAnchor="middle" fontSize="13" fontWeight="800"
+            fill={isHero?RUST:BLUE} stroke="#fff" strokeWidth="5" paintOrder="stroke"
+            fontFamily="Nunito,sans-serif">{(w*100).toFixed(0)}%</text>);
+      })}
+      {prompt.tokens.map((t,i)=>{
+        const w=widths[i], clickable=i<prompt.reader, isHero=i===prompt.hero;
+        return (
+          <g key={i} onClick={clickable?()=>onReveal(i):undefined}
+            style={{cursor:clickable?'pointer':'default'}}>
+            <rect x={xs[i]} y={TOPY} width={w} height={36} rx="9"
+              fill={isHero?HL:i===prompt.reader?'#E8F1FF':'#fff'} stroke={INK} strokeWidth="2"/>
+            <text x={xs[i]+w/2} y={TOPY+24} textAnchor="middle" fontSize="15.5" fontWeight="700"
+              fontFamily="Nunito,sans-serif">{t}{i===prompt.reader?' ❓':''}</text>
+          </g>);
+      })}
+    </svg>);
+}
+
+// Beat 2: every earlier word pours its note into the reader's cup — weighted blend.
+function AttnCup({L,prompt,lang}){
+  const scores=prompt.att;
+  const exp=scores.map(a=>Math.exp(a.s));
+  const sum=exp.reduce((a,b)=>a+b,0);
+  const shares=scores.map((a,k)=>({i:a.i,w:exp[k]/sum}));
+  const last=prompt.tokens[prompt.reader];
+  const W=380, CUPX=130, CUPW=120, CUPY=150, CUPH=84;
+  const n=shares.length, span=W-40;
+  let yAcc=CUPY+CUPH-3;
+  const bands=shares.map((s,k)=>{
+    const h=Math.max(3,s.w*(CUPH-8));
+    yAcc-=h;
+    return {y:yAcc,h,color:MIX_COLORS[k%MIX_COLORS.length],...s};
+  });
+  return (
+    <div>
+      <svg viewBox={`0 0 ${W} 275`} style={{width:'100%',maxWidth:W,display:'block'}}>
+        {shares.map((s,k)=>{
+          const chipW=tokBoxW(prompt.tokens[s.i]);
+          const chipX=20+span*(k+0.5)/n-chipW/2;
+          const sw=6+s.w*30;
+          const tipX=CUPX+CUPW*(k+0.5)/n;
+          return (
+            <g key={s.i}>
+              <polygon points={`${chipX+chipW/2-sw/2},48 ${chipX+chipW/2+sw/2},48 ${tipX+3},${CUPY+4} ${tipX-3},${CUPY+4}`}
+                fill={MIX_COLORS[k%MIX_COLORS.length]} opacity=".5" className="pop-anim"
+                style={{animationDelay:(k*0.18)+'s'}}/>
+              <rect x={chipX} y={14} width={chipW} height={34} rx="9"
+                fill={MIX_COLORS[k%MIX_COLORS.length]} stroke={INK} strokeWidth="2"/>
+              <text x={chipX+chipW/2} y={36} textAnchor="middle" fontSize="15" fontWeight="800"
+                fill="#fff" fontFamily="Nunito,sans-serif">{prompt.tokens[s.i]}</text>
+              <text x={chipX+chipW/2} y={62} textAnchor="middle" fontSize="12.5" fontWeight="800"
+                fill={INK}>{(s.w*100).toFixed(0)}%</text>
+            </g>);
+        })}
+        {bands.map((b,k)=>(
+          <rect key={k} x={CUPX+3} y={b.y} width={CUPW-6} height={b.h} fill={b.color}
+            opacity=".75" className="grow-anim" style={{animationDelay:(0.3+k*0.18)+'s'}}/>))}
+        <path d={`M ${CUPX} ${CUPY} L ${CUPX} ${CUPY+CUPH-10} Q ${CUPX} ${CUPY+CUPH} ${CUPX+10} ${CUPY+CUPH}
+                  L ${CUPX+CUPW-10} ${CUPY+CUPH} Q ${CUPX+CUPW} ${CUPY+CUPH} ${CUPX+CUPW} ${CUPY+CUPH-10}
+                  L ${CUPX+CUPW} ${CUPY}`}
+          fill="none" stroke={INK} strokeWidth="3"/>
+        <text x={CUPX+CUPW/2} y={CUPY+CUPH+28} textAnchor="middle" fontSize="20" fontWeight="700"
+          fontFamily="Caveat,cursive">☕ {last}</text>
+      </svg>
+      <div style={{fontSize:15,fontWeight:800,marginTop:8}}>
+        {L.s4Mix(last)}{' '}
+        {shares.map((s,k)=>(
+          <span key={s.i}>
+            <span style={{color:MIX_COLORS[k%MIX_COLORS.length]}}>
+              {(s.w*100).toFixed(0)}% {prompt.tokens[s.i]}</span>
+            {k<shares.length-1?' + ':''}
+          </span>))}
+      </div>
+    </div>);
+}
+
+function Scene4({L,prompt,lang,progress}){
+  const [revealed,setRevealed]=useState([]);
+  const [beatSel,setBeatSel]=useState(0);
+  useEffect(()=>{setRevealed([]);setBeatSel(0);},[prompt.id]);
+  const beat=progress==null?beatSel:(progress<0.5?0:1);
+  // stepper: ←/→ move between beats first, then fall through to scene navigation
+  const beatRef=useRef(beat); beatRef.current=beat;
+  useEffect(()=>{
+    if(progress!=null) return;
+    window.__sceneKeyHandler=(key)=>{
+      if(key==='ArrowRight'&&beatRef.current<1){setBeatSel(1);return true;}
+      if(key==='ArrowLeft'&&beatRef.current>0){setBeatSel(0);return true;}
+      return false;
+    };
+    return ()=>{window.__sceneKeyHandler=null;};
+  },[progress]);
+  const last=prompt.tokens[prompt.reader];
+  const hero=prompt.tokens[prompt.hero];
+  const scores=prompt.att;
+  const allIn=revealed.length===scores.length;
+  const heads=[L.s4B1Head,L.s4B2Head];
+  return (
+    <SceneFrame title={L.s4Title} lead={L.s4Lead(last,hero)} aside={beat===1?L.s4KV:null} nerd={L.s4Nerd}>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:12,flexWrap:'wrap'}}>
+        {heads.map((h,i)=>(
+          <button key={i} onClick={progress==null?()=>setBeatSel(i):undefined}
+            style={{cursor:progress==null?'pointer':'default',border:`2px solid ${INK}`,borderRadius:16,
+              padding:'3px 12px',fontSize:12.5,fontWeight:800,fontFamily:'Nunito,sans-serif',
+              background:i===beat?RUST:i<beat?'#E6F0E9':'#fff',color:i===beat?'#fff':INK}}>{h}</button>))}
+      </div>
+      {beat===0&&(
+        <div className="pop-anim">
+          <div style={{fontSize:12.5,color:'var(--faint)',marginBottom:8}}>🚫 {L.s4Mask}</div>
+          <div className="wb-card" style={{padding:'12px 14px 6px',width:'fit-content',maxWidth:'100%',minWidth:300}}>
+            <AttnArcs L={L} prompt={prompt} revealed={revealed}
+              onReveal={(i)=>setRevealed(r=>r.includes(i)?r:[...r,i])}/>
+            <div style={{margin:'6px 4px 10px',fontSize:14.5,minHeight:40,maxWidth:540}}>
+              {allIn? <span className="pop-anim" style={{color:GREEN,fontWeight:800}}>✓ {(()=>{
+                        const winner=prompt.tokens[scores.reduce((a,b)=>b.s>a.s?b:a).i];
+                        if(prompt.hero===prompt.reader) return L.s4YouAsk(winner,last);
+                        return winner===hero?L.s4YouGeneric(hero,last):L.s4OtherWins(winner,last);
+                      })()}</span>
+                    : <span style={{color:'var(--faint)'}}>{L.s4ClickPrompt}</span>}
+            </div>
+          </div>
+        </div>)}
+      {beat===1&&(
+        <div className="pop-anim">
+          <p style={{fontSize:15.5,maxWidth:680,marginTop:0}}>{L.s4MixLead}</p>
+          <div className="wb-card" style={{padding:'14px 18px',maxWidth:520}}>
+            <AttnCup L={L} prompt={prompt} lang={lang}/>
+          </div>
+        </div>)}
+      {progress==null&&(
+        <div style={{display:'flex',gap:10,marginTop:16}}>
+          <button className="wb-btn" disabled={beat===0} onClick={()=>setBeatSel(0)}>{L.s5Prev}</button>
+          <button className="wb-btn primary" disabled={beat===1} onClick={()=>setBeatSel(1)}
+            data-testid="attn-next">{L.s5Next}</button>
+        </div>)}
+    </SceneFrame>);
+}
+
+function Scene5({L,prompt,lang,progress}){
+  const [beatSel,setBeatSel]=useState(0);
+  const [ffnOn,setFfnOn]=useState(true);
+  useEffect(()=>{setBeatSel(0);setFfnOn(true);},[prompt.id]);
+  const beat=progress==null?beatSel:Math.min(2,Math.floor(progress*3.2));
+  // route ←/→ to beats first; only unconsumed presses fall through to scene navigation
+  const beatRef=useRef(beat); beatRef.current=beat;
+  useEffect(()=>{
+    if(progress!=null) return;
+    window.__sceneKeyHandler=(key)=>{
+      if(key==='ArrowRight'&&beatRef.current<2){setBeatSel(b=>Math.min(2,b+1));return true;}
+      if(key==='ArrowLeft'&&beatRef.current>0){setBeatSel(b=>Math.max(0,b-1));return true;}
+      return false;
+    };
+    return ()=>{window.__sceneKeyHandler=null;};
+  },[progress]);
+  const F=prompt.ffn;
+  const after=prompt.start.slice(0,5);
+  const heads=[L.s5B1Head,L.s5B2Head,L.s5B3Head];
+  const Panel=({title,dist,active,note,testid})=>{
+    const m=Math.max(...dist.map(c=>c.p));
+    return (
+      <div data-testid={testid} className="wb-card" style={{padding:'12px 16px',flex:'1 1 230px',maxWidth:330,
+        opacity:active?1:.38,outline:active?`3px solid ${GREEN}`:'none',
+        filter:active?'none':'grayscale(.7)',transition:'all .35s'}}>
+        <div style={{fontSize:13,fontWeight:800,marginBottom:6}}>{title}</div>
+        {dist.map((c,i)=>(
+          <div key={c.t} style={{display:'flex',alignItems:'center',gap:7,margin:'3px 0'}}>
+            <span style={{width:74,fontWeight:700,fontFamily:'monospace',fontSize:13}}>{c.t==='.'?'⟨.⟩':c.t}</span>
+            <div style={{flex:1,height:14,border:`1.5px solid ${INK}`,borderRadius:5,overflow:'hidden'}}>
+              <div className="barfill" style={{width:(c.p/m*100)+'%',height:'100%',
+                background:i===0?RUST:BLUE,opacity:i===0?1:.6}}/>
+            </div>
+            <span style={{width:44,fontSize:12,fontWeight:800,textAlign:'right'}}>{(c.p*100).toFixed(0)}%</span>
+          </div>))}
+        <div style={{fontSize:11.5,color:active?GREEN:'var(--faint)',fontWeight:active?700:400,
+          marginTop:6,minHeight:30}}>{note}</div>
+      </div>);
+  };
+  return (
+    <SceneFrame title={L.s5Title} lead={L.s5Lead} nerd={L.s5Nerd}
+      aside={beat===1?L.s5Rome:beat===2?L.s5Bridge:null}>
+      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:14,flexWrap:'wrap'}}>
+        {heads.map((h,i)=>(
+          <button key={i} onClick={progress==null?()=>setBeatSel(i):undefined}
+            style={{cursor:progress==null?'pointer':'default',border:`2px solid ${INK}`,borderRadius:16,
+              padding:'3px 12px',fontSize:12.5,fontWeight:800,fontFamily:'Nunito,sans-serif',
+              background:i===beat?RUST:i<beat?'#E6F0E9':'#fff',color:i===beat?'#fff':INK}}>{h}</button>))}
+      </div>
+      {beat===0&&(
+        <div className="pop-anim">
+          <p style={{fontSize:15.5,maxWidth:680,marginTop:0}}>{L.s5B1}</p>
+          <div style={{display:'flex',gap:12,flexWrap:'wrap',alignItems:'center'}}>
+            <ArrowSvg angle={42} len={70} w={120} h={110}/>
+            {F.clues[lang==='zh'?'zh':'en'].map(c=>(
+              <span key={c} style={{border:`2px solid ${BLUE}`,color:BLUE,borderRadius:18,
+                padding:'6px 14px',fontWeight:700,fontSize:14,background:'#F0F5FF'}}>{c}</span>))}
+          </div>
+        </div>)}
+      {beat===1&&(
+        <div className="pop-anim">
+          <p style={{fontSize:15.5,maxWidth:680,marginTop:0}}>{L.s5B2('14,336')}</p>
+          <div style={{display:'flex',gap:16,alignItems:'flex-end',flexWrap:'wrap'}}>
+            <div className="wb-card" style={{padding:'18px 16px 12px',background:'#F6F1E6',maxWidth:'100%'}}>
+              <div className="drawer-scroll" style={{display:'flex',gap:8}}>
+                {F.drawers.map((d,i)=>{
+                  const lbl=lang==='zh'?d.lz:d.l, adds=lang==='zh'?d.az:d.a;
+                  return (
+                    <div key={i} style={{width:110,flex:'0 0 110px',textAlign:'center'}}>
+                      <div style={{border:`2px solid ${INK}`,borderRadius:8,
+                        background:d.match?'#FFF3D6':'#fff',padding:'10px 6px 12px',
+                        transform:d.match?'translateY(9px)':'none',
+                        boxShadow:d.match?`0 -9px 0 -2px ${HL}`:'none',transition:'transform .4s'}}>
+                        <div style={{fontSize:11.5,fontWeight:800,lineHeight:1.25,minHeight:44}}>{lbl}</div>
+                        <div style={{width:26,height:5,border:`1.5px solid ${INK}`,borderRadius:3,
+                          margin:'8px auto 0',background:d.match?RUST:'#ddd'}}/>
+                      </div>
+                      <div className={d.match?'stamp-anim':''} style={{fontSize:11.5,fontWeight:800,
+                        marginTop:6,color:d.match?GREEN:'rgba(43,43,43,.35)',minHeight:32}}>{adds}</div>
+                    </div>);
+                })}
+              </div>
+              <div style={{fontSize:11.5,color:'var(--faint)',marginTop:8}}>{L.drawerMore('14,331')}</div>
+            </div>
+            <ArrowSvg angle={42} len={86} notes={3} w={150} h={130}/>
+          </div>
+        </div>)}
+      {beat===2&&(
+        <div className="pop-anim">
+          <p style={{fontSize:15.5,maxWidth:680,marginTop:0}}>{L.s5B3}</p>
+          <div style={{display:'flex',gap:16,alignItems:'center',flexWrap:'wrap'}}>
+            <Panel title={L.s5WithoutTitle} dist={F.before} active={!ffnOn}
+              note={!ffnOn?L.s5MushNote:''} testid="panel-without"/>
+            <button className="wb-btn rust" data-testid="ffn-switch" style={{minWidth:160}}
+              onClick={()=>setFfnOn(o=>!o)}>{ffnOn?L.s5SwitchOn:L.s5SwitchOff}</button>
+            <Panel title={L.s5WithTitle} dist={after} active={ffnOn}
+              note={ffnOn?L.s5SharpNote:''} testid="panel-with"/>
+          </div>
+        </div>)}
+      {progress==null&&(
+        <div style={{display:'flex',gap:10,marginTop:18}}>
+          <button className="wb-btn" disabled={beat===0} onClick={()=>setBeatSel(b=>b-1)}>{L.s5Prev}</button>
+          <button className="wb-btn primary" disabled={beat===2} onClick={()=>setBeatSel(b=>b+1)}
+            data-testid="ffn-next">{L.s5Next}</button>
+        </div>)}
+    </SceneFrame>);
+}
+
+// The conveyor belt: the word card rides past repeating meeting→workshop
+// stations; every block sticks one more margin note onto the card.
+function Scene6({L,prompt,progress}){
+  const [layer,setLayer]=useState(1);
+  const n=progress==null?layer:1+Math.round(progress*31);
+  const heroWord=prompt.tokens[prompt.hero];
+  const W=560, BELTY=140;
+  const cardX=26+(n-1)/31*(W-150);
+  const notes=Math.min(n,10);
+  const NOTE_COLORS=[BLUE,GREEN,'#8B5CF6',RUST];
+  return (
+    <SceneFrame title={L.s6Title} lead={L.s6Lead} nerd={L.s6Nerd}>
+      <div className="wb-card" style={{padding:'12px 14px 8px',maxWidth:620}}>
+        <svg viewBox={`0 0 ${W} 185`} style={{width:'100%',maxWidth:W,display:'block'}}>
+          {/* repeating stations behind the belt */}
+          {Array.from({length:4},(_,k)=>{
+            const sx=24+k*130;
+            return (
+              <g key={k} opacity=".85">
+                <rect x={sx} y={14} width={56} height={24} rx={6} fill="#F0F5FF" stroke={BLUE} strokeWidth="1.5"/>
+                <text x={sx+28} y={30} textAnchor="middle" fontSize="10.5" fontWeight="800"
+                  fill={BLUE} fontFamily="Nunito,sans-serif">🗣 {L.s6StopA}</text>
+                <rect x={sx+62} y={14} width={56} height={24} rx={6} fill="#FFF7F2" stroke={RUST} strokeWidth="1.5"/>
+                <text x={sx+90} y={30} textAnchor="middle" fontSize="10.5" fontWeight="800"
+                  fill={RUST} fontFamily="Nunito,sans-serif">🔧 {L.s6StopB}</text>
+              </g>);
+          })}
+          <text x={W-10} y={30} textAnchor="end" fontSize="14" fontFamily="Caveat,cursive"
+            fill="rgba(43,43,43,.55)">… ×32</text>
+          {/* the belt */}
+          <rect x={8} y={BELTY} width={W-16} height={15} rx={7} fill="#EDE8DC" stroke={INK} strokeWidth="2"/>
+          {Array.from({length:14},(_,k)=>(
+            <line key={k} x1={20+k*40} y1={BELTY+2} x2={28+k*40} y2={BELTY+13}
+              stroke="rgba(43,43,43,.3)" strokeWidth="2"/>))}
+          {/* the word card, margin notes piling on top */}
+          <g style={{transform:`translateX(${cardX}px)`,transition:'transform .35s ease-out'}}>
+            {Array.from({length:notes},(_,k)=>(
+              <rect key={k} x={18+(k%3)*3} y={BELTY-52-k*5.5} width={62} height={4.5} rx={2}
+                fill={NOTE_COLORS[k%4]} opacity=".85"/>))}
+            <rect x={8} y={BELTY-44} width={86} height={40} rx={9} fill="#fff"
+              stroke={INK} strokeWidth="2.5"/>
+            <text x={51} y={BELTY-19} textAnchor="middle" fontSize="15" fontWeight="800"
+              fontFamily="Nunito,sans-serif">{heroWord}</text>
+          </g>
+        </svg>
+        <div style={{textAlign:'center',fontSize:13,fontWeight:800,marginTop:4}}>
+          {L.s6Block(n)} · <span style={{color:GREEN}}>{L.s6Notes(n)}</span></div>
+      </div>
+      <div style={{display:'flex',gap:24,alignItems:'center',flexWrap:'wrap',marginTop:16}}>
+        {progress==null&&<div style={{flex:'1 1 300px',maxWidth:460}}>
+          <div style={{fontSize:14,fontWeight:800,marginBottom:4}}>{L.s6Scrub}</div>
+          <input type="range" min="1" max="32" value={layer} onChange={e=>setLayer(+e.target.value)}/>
+        </div>}
+        <div className="wb-card" style={{padding:'12px 16px',width:170}}>
+          <div className="hand" style={{fontSize:22,marginBottom:4}}>{L.s6Gauge}</div>
+          <div style={{height:10,border:`1.5px solid ${INK}`,borderRadius:5,overflow:'hidden'}}>
+            <div style={{width:'72%',height:'100%',background:GREEN}}/>
+          </div>
+          <div style={{fontSize:11.5,color:'var(--faint)',marginTop:4}}>{L.s6GaugeSub}</div>
+        </div>
+      </div>
+    </SceneFrame>);
+}
+
+// The draw wheel: slice size = chance of being the next piece. Sampling spins
+// the wheel so the pointer lands inside the drawn slice.
+function Scene7({L,prompt}){
+  const [gen,setGen]=useState([]);
+  const [temp,setTemp]=useState(1.0);
+  const [topP,setTopP]=useState(0.95);
+  const [auto,setAuto]=useState(false);
+  const [flash,setFlash]=useState(0);
+  const [rot,setRot]=useState(0);
+  const [spin,setSpin]=useState(false);
+  const done=gen.length>0&&gen[gen.length-1]==='.';
+  const raw=nextCandidates(prompt,gen);
+  const reweighted=useMemo(()=>{
+    const c=applyTemperature(raw,temp).sort((a,b)=>b.q-a.q);
+    const kept=topPSet(c,topP).map(x=>x.t);
+    return c.map(x=>({...x,kept:kept.includes(x.t)}));
+  },[raw,temp,topP]);
+  const kept=reweighted.filter(c=>c.kept);
+  const keptSum=kept.reduce((a,c)=>a+c.q,0)||1;
+  let acc=0;
+  const slices=kept.map((c,k)=>{
+    const a0=acc/keptSum*360; acc+=c.q;
+    const a1=acc/keptSum*360;
+    return {...c,a0,a1,mid:(a0+a1)/2,color:MIX_COLORS[k%MIX_COLORS.length]};
+  });
+  const dropped=reweighted.filter(c=>!c.kept);
+  const step=(greedy)=>{
+    if(done||spin) return;
+    let pick;
+    if(greedy) pick=kept[0];
+    else{
+      let r=Math.random()*keptSum;
+      pick=kept[0];
+      for(const c of kept){ r-=c.q; if(r<=0){pick=c;break;} }
+    }
+    const sl=slices.find(s=>s.t===pick.t);
+    // land the pointer (top) inside the picked slice: rot+mid ≡ 0 (mod 360), plus 2 spins
+    setRot(r=>r+720+((((-sl.mid)-r)%360)+360)%360);
+    setSpin(true);
+    setTimeout(()=>{ setGen(g=>[...g,pick.t]); setFlash(f=>f+1); setSpin(false); },950);
+  };
+  useEffect(()=>{
+    if(!auto||done) {if(done) setAuto(false); return;}
+    const t=setTimeout(()=>step(false),700);
+    return ()=>clearTimeout(t);
+  },[auto,gen,done,spin]);
+  useEffect(()=>{setGen([]);setAuto(false);setRot(0);},[prompt.id]);
+  const CX=115,CY=120,R=98;
+  const pt=(a)=>{const r2=(a-90)*Math.PI/180; return `${CX+R*Math.cos(r2)} ${CY+R*Math.sin(r2)}`;};
+  const lpt=(a,r)=>{const r2=(a-90)*Math.PI/180; return {x:CX+r*Math.cos(r2),y:CY+r*Math.sin(r2)};};
+  return (
+    <SceneFrame title={L.s7Title} lead={L.s7Lead} nerd={L.s7Nerd}>
+      <div style={{fontSize:12.5,color:RUST,fontWeight:600,marginBottom:10}}>⚠ {L.s7Honest}</div>
+      <SentenceRow prompt={prompt} heroOn={false} gen={gen}/>
+      <div style={{display:'flex',gap:18,flexWrap:'wrap',alignItems:'flex-start'}}>
+        <div className="wb-card" style={{padding:'14px 18px',flex:'1 1 340px',maxWidth:480}}>
+          <div style={{fontSize:14,fontWeight:800,marginBottom:8}}>{L.s7Wheel}</div>
+          {done
+            ? <div className="pop-anim hand" style={{fontSize:26,color:GREEN}}>■ {L.s7Done(gen.length)}</div>
+            : <div style={{display:'flex',gap:14,alignItems:'center',flexWrap:'wrap'}}>
+                <svg viewBox="0 0 230 240" style={{width:230,maxWidth:'100%'}}>
+                  <g style={{transform:`rotate(${rot}deg)`,transformOrigin:`${CX}px ${CY}px`,
+                    transition:spin?'transform .9s cubic-bezier(.15,.65,.25,1)':'none'}}>
+                    {slices.map(s=>(
+                      s.a1-s.a0>=359.9
+                        ? <circle key={s.t} cx={CX} cy={CY} r={R} fill={s.color} opacity=".85"
+                            stroke={INK} strokeWidth="2"/>
+                        : <path key={s.t}
+                            d={`M ${CX} ${CY} L ${pt(s.a0)} A ${R} ${R} 0 ${s.a1-s.a0>180?1:0} 1 ${pt(s.a1)} Z`}
+                            fill={s.color} opacity=".85" stroke={INK} strokeWidth="2"/>))}
+                    {slices.map(s=>{
+                      if(s.a1-s.a0<26) return null;
+                      const p=lpt(s.mid,R*0.62);
+                      // keep labels upright: flip the ones whose FINAL visual angle
+                      // (slice mid + current wheel rotation) lands in the lower half
+                      const v=(((s.mid+rot)%360)+360)%360;
+                      const a=v>90&&v<270?s.mid+180:s.mid;
+                      return <text key={s.t} x={p.x} y={p.y} textAnchor="middle" fontSize="13.5"
+                        fontWeight="800" fill="#fff" stroke="rgba(0,0,0,.25)" strokeWidth="2"
+                        paintOrder="stroke" fontFamily="Nunito,sans-serif"
+                        transform={`rotate(${a} ${p.x} ${p.y})`}>{s.t==='.'?'⟨.⟩':s.t}</text>;
+                    })}
+                  </g>
+                  <circle cx={CX} cy={CY} r="13" fill="#fff" stroke={INK} strokeWidth="2.5"/>
+                  <polygon points={`${CX-9},6 ${CX+9},6 ${CX},24`} fill={RUST} stroke={INK} strokeWidth="1.5"/>
+                </svg>
+                <div style={{flex:'1 1 130px',minWidth:130}}>
+                  {slices.map(s=>(
+                    <div key={s.t} style={{display:'flex',alignItems:'center',gap:7,margin:'3px 0',fontSize:13.5}}>
+                      <span style={{width:12,height:12,borderRadius:3,background:s.color,
+                        border:`1.5px solid ${INK}`,flex:'0 0 12px'}}/>
+                      <span style={{fontWeight:700,fontFamily:'monospace'}}>{s.t==='.'?'⟨.⟩':s.t}</span>
+                      <span style={{marginLeft:'auto',fontWeight:800}}>{(s.q/keptSum*100).toFixed(0)}%</span>
+                    </div>))}
+                  {dropped.length>0&&<div style={{marginTop:8,fontSize:11.5,color:'var(--faint)'}}>
+                    🚫 {L.s7Cut}: {dropped.map(c=>c.t==='.'?'⟨.⟩':c.t).join(' · ')}</div>}
+                </div>
+              </div>}
+          <div style={{display:'flex',gap:10,marginTop:14,flexWrap:'wrap'}}>
+            <button className="wb-btn rust" onClick={()=>step(false)} disabled={done||spin}>{L.s7Sample}</button>
+            <button className="wb-btn" onClick={()=>step(true)} disabled={done||spin}>{L.s7Greedy}</button>
+            <button className="wb-btn primary" onClick={()=>setAuto(a=>!a)} disabled={done}>
+              {auto?L.s7Stop:L.s7Auto}</button>
+            <button className="wb-btn" onClick={()=>{setGen([]);setAuto(false);}}>{L.s7Reset}</button>
+          </div>
+        </div>
+        <div style={{flex:'1 1 240px',maxWidth:330}}>
+          <div className="wb-card" style={{padding:'12px 16px',marginBottom:14}}>
+            <div style={{fontSize:13.5,fontWeight:800}}>{L.s7Temp}: {temp.toFixed(1)}</div>
+            <input type="range" min="0.1" max="2" step="0.1" value={temp} onChange={e=>setTemp(+e.target.value)}/>
+            <div style={{display:'flex',justifyContent:'space-between',fontSize:11.5,color:'var(--faint)'}}>
+              <span>{L.s7TempLo}</span><span>{L.s7TempHi}</span></div>
+            <div style={{fontSize:13.5,fontWeight:800,marginTop:10}}>{L.s7TopP}: {topP.toFixed(2)}</div>
+            <input type="range" min="0.5" max="1" step="0.05" value={topP} onChange={e=>setTopP(+e.target.value)}/>
+          </div>
+          <div className="wb-card" style={{padding:'12px 16px'}}>
+            <div className="hand" style={{fontSize:24,color:RUST,marginBottom:6}}>{L.s7Loops(gen.length)}</div>
+            <div style={{display:'flex',gap:4,alignItems:'center',flexWrap:'wrap'}} key={flash}>
+              {L.s7Pipe.map((s,i)=>(
+                <React.Fragment key={s}>
+                  <span className={flash>0?'flash':''} style={{border:`1.5px solid ${INK}`,borderRadius:6,
+                    padding:'2px 7px',fontSize:11.5,fontWeight:700,
+                    animationDelay:(i*0.12)+'s'}}>{s}</span>
+                  {i<L.s7Pipe.length-1&&<span style={{fontSize:11}}>→</span>}
+                </React.Fragment>))}
+              <span style={{fontSize:15,marginLeft:2}}>↺</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </SceneFrame>);
+}
+
+const DECODER_ROWS=[
+  {term:'vocab_size = 128,256',scene:1,en:['tokenizer (front door)','how many word-pieces the catalogue holds'],zh:['分词器（大门）','目录里词片的总数']},
+  {term:'hidden_size = 4,096',scene:2,en:['the arrow / belt width','numbers in every token’s vector'],zh:['箭头 / 传送带宽度','每个 token 向量的数字个数']},
+  {term:'num_hidden_layers = 32',scene:6,en:['conveyor blocks','meeting-room + workshop repeats'],zh:['传送带厂块','会议室+车间的重复次数']},
+  {term:'num_attention_heads = 32',scene:4,en:['meeting rooms per block','parallel attention passes'],zh:['每块的会议室数','并行注意力通道']},
+  {term:'num_key_value_heads = 8',scene:4,en:['shared filing cabinets (GQA)','4 askers share 1 KV cabinet'],zh:['共享文件柜（GQA）','4 个提问者共用 1 柜']},
+  {term:'intermediate_size = 14,336',scene:5,en:['memory drawers per floor (FFN)','drawer-label + contents pairs per block'],zh:['每层的记忆抽屉数（FFN）','每块的抽屉标签+内容对数']},
+  {term:'hidden_act = silu (SwiGLU)',scene:5,en:['the drawer dimmer','decides how wide each drawer opens'],zh:['抽屉调光器','决定每个抽屉开多大']},
+  {term:'rope_theta = 500,000',scene:3,en:['order-stamp tuning (RoPE)','rotation frequency spread'],zh:['顺序印章调参（RoPE）','旋转频率分布']},
+  {term:'rms_norm_eps = 1e-5',scene:6,en:['length gauge (RMSNorm)','keeps arrow length stable'],zh:['长度校准仪（RMSNorm）','保持箭头长度稳定']},
+  {term:'temperature / top_p',scene:7,en:['the dice at the exit','how daring the draw is & tail cutoff'],zh:['出口处的骰子','抽签胆量与长尾截断']},
+];
+function Scene8({L,lang,goto}){
+  return (
+    <SceneFrame title={L.s8Title} lead={L.s8Lead}>
+      <div className="wb-card table-scroll" style={{overflowX:'auto'}}>
+        <table style={{borderCollapse:'collapse',width:'100%',fontSize:14,minWidth:560}}>
+          <thead><tr style={{background:'#F1EDE3'}}>
+            {L.s8Cols.map(c=><th key={c} style={{textAlign:'left',padding:'9px 14px',
+              borderBottom:`2px solid ${INK}`}}>{c}</th>)}
+          </tr></thead>
+          <tbody>
+            {DECODER_ROWS.map(r=>{
+              const txt=lang==='zh'?r.zh:r.en;
+              return (<tr key={r.term} onClick={()=>goto&&goto(r.scene)}
+                style={{cursor:goto?'pointer':'default'}}
+                onMouseEnter={e=>e.currentTarget.style.background='#FFFBEA'}
+                onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                <td style={{padding:'8px 14px',fontFamily:'monospace',fontWeight:700,
+                  borderBottom:'1px solid rgba(43,43,43,.15)'}}>{r.term}</td>
+                <td style={{padding:'8px 14px',fontWeight:700,color:RUST,
+                  borderBottom:'1px solid rgba(43,43,43,.15)'}}>{txt[0]}</td>
+                <td style={{padding:'8px 14px',borderBottom:'1px solid rgba(43,43,43,.15)'}}>{txt[1]}</td>
+              </tr>);})}
+          </tbody>
+        </table>
+      </div>
+      <p className="hand" style={{fontSize:28,color:GREEN,marginTop:18}}>{L.s8Close}</p>
+    </SceneFrame>);
+}
+
+const SCENES=[Scene0,Scene1,Scene2,Scene3,Scene4,Scene5,Scene6,Scene7,Scene8];
