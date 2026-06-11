@@ -6,16 +6,11 @@ An interactive explainer of how a large language model reads your sentence and w
 
 Bilingual: English / 中文 (toggle in the top-right corner).
 
-## Two ways to ride
+## The ride
 
-| Variant | File | Style |
-|---|---|---|
-| **A · Stepper** | `stepper.html` | Guided tour. One station at a time — Next/Back buttons, clickable pipeline rail, keyboard ← →. Every scene fully interactive before you advance. |
-| **B · Scrolly** | `scrolly.html` | One long scroll through the whole factory. Sticky stages animate as you scroll — tokens chop, arrows rotate, detectors fire, 32 blocks scrub by. |
+`index.html` is the guided tour: one station at a time — Next/Back buttons, clickable pipeline rail, keyboard ← →. Every scene fully interactive before you advance. It ends at the next-token prediction loop — sample, watch the reply grow piece by piece, and feel the whole factory rerun for every word.
 
-Both end at the same place: the next-token prediction loop — sample, watch the reply grow piece by piece, and feel the whole factory rerun for every word.
-
-`index.html` is the chooser page.
+(`stepper.html` / `scrolly.html` are redirect stubs kept for old links; the scrolly variant was retired.)
 
 ## What it covers
 
@@ -23,8 +18,8 @@ Tokenization → embeddings → positional order → attention → FFN ("the wor
 
 ## Tech
 
-- Single-file HTML pages, no build step
-- React 18 + Babel standalone via CDN (stepper/scrolly)
+- Static HTML, no server-side build — JSX in `src/` is precompiled to `dist/` with `./build.sh`
+- React 18 via CDN
 - Hand-drawn paper aesthetic: Caveat + Nunito
 
 ## Run locally
